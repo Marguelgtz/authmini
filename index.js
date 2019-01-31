@@ -30,6 +30,30 @@ server.post('/api/register', (req, res) => {
     })
 })
 
+server.post('/api/login', (req, res) => {
+  // grab username/password from body
+  const creds = req.body
+  // comprare the hash from the user password
+  db('users').where('username', creds.username).first()
+    .then(user => {
+      if(user && bcrypt.compareSync(creds.password, user.password)) {
+        //Password match
+        res
+          .status(200)
+          .json({message: 'welcome'})
+      } else {
+        res
+          .status(401)
+          .json({message: 'failed to authenticate'})
+      }
+    })
+    .catch(err => {
+      res
+        .status(500)
+        .json(err)
+    })
+})
+
 server.get('/', (req, res) => {
   res.send('Its Alive!');
 });
