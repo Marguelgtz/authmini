@@ -1,31 +1,37 @@
-require('dotenv').config();
-
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet')
 const bcrypt = require('bcryptjs')
-const jwt = require('jsonwebtoken')
+const session = require('express-session')
+const knexSessionStore = require('connect-session-knex')(session)
 
 const db = require('./database/dbConfig.js');
 
 const server = express();
 
+const sessionConfig ={
+  name: 'cookie_name', //default name: default is sid(not recomended)
+  secret: 'asdjfhalkjdfu0087DWNOIQUWHNNO*(&YX3X' ,//cookie is encrypted using this secret, 
+  cookie: {
+    maxAge: 1000 * 60 * 10, // 10 minute session in miliseconds
+    secure: false,// only send the cookie over https, should be true in production
+  },
+  httpOnly: true, //Javascript can't touch cookie
+  resave: false, //compliance with the law
+  saveUninitialized: false, //compliance with the law
+  store: new knexSessionStore({
+    tablename: 'sessions',
+    sidfieldname: 'sid',
+    knex: db,
+    createtable: true,
+    clearInterval: 1000 * 60 * 15,
+  })
+}
+
 server.use(express.json());
 server.use(cors());
-server.use(helmet());
-
-const generateToken = (user) => {
-  const payload = {
-    username: user.username,
-    roles: ['admin','sales'] //should come from database
-  };
-  const secret = process.env.JWT_SECRET;
-  const options = {
-    expiresIn: '30m',
-  }
-
-  return jwt.sign(payload, secret, options)
-}
+server.use(helmet())
+server.use(session(sessionConfig))
 
 server.post('/api/register', (req, res) => {
   // grab username/password from body
@@ -37,7 +43,6 @@ server.post('/api/register', (req, res) => {
   // save the user to the database
   db('users').insert(creds)
     .then(ids => {
-      console.log(id)
       res
         .status(201)
         .json(ids)
@@ -57,11 +62,10 @@ server.post('/api/login', (req, res) => {
     .then(user => {
       if(user && bcrypt.compareSync(creds.password, user.password)) {
         //Password match
-        //create token 
-        const token = generateToken(user)
+        req.session.user = user;
         res
           .status(200)
-          .json({message: `welcome ${user.username}`, token})
+          .json({message: `welcome ${user.username}`})
       } else {
         res
           .status(401)
@@ -80,56 +84,39 @@ server.get('/', (req, res) => {
 });
 
 const protected = (req, res, next) => {
-  //The auth token is normally sent on the authorization header
-  const token = req.headers.authorization;
-  if(token){
-    jwt.verify(token, process.env.JWT_SECRET, (err, decodedToken) => {
-      if(err) {
-        res
-      .status(401)
-      .json({message: 'Invalid Token'})
-      } else {
-        req.decodedToken = decodedToken;
-        next();
-      }
-    })
+  //if the user is logged in next()
+  if(req.session && req.session.user) {
+    next()
   } else {
     res
       .status(401)
-      .json({message: 'No token Provided'})
-  }
-}
-
-const checkRole = (role) => {
-  return (req, res, next) => {
-    if (req.decodedToken.roles.includes(role)) {
-      next()
-    } else {
-      res
-        .status(403)
-        .json({message: `you need to be an ${role}`})
-    }
+      .json({message: 'not logged in'})
   }
 }
 
 // protect this route, only authenticated users should see it
-server.get('/api/users', protected, checkRole('admin'), async (req, res) => {
+server.get('/api/users', protected, async (req, res) => {
   db('users')
     .select('id', 'username')
     .then(users => {
-      res.json({users, decodedToken: req.decodedToken});
+      res.json(users);
     })
     .catch(err => res.send(err));
 });
 
-server.get('/api/users/me', protected, checkRole('root'), async (req, res) => {
-  db('users')
-    .where('username', req.decodedToken.username).first()
-    .then(user => {
-      res.json(user);
-    })
-    .catch(err => res.send(err));
-});
+// Logout
+server.get('/api/logout', (req, res) => {
+  if(req.session) {
+    req.session.destroy()
+    res
+      .status(200)
+      .json({message: 'session destroyed'})
+  } else {
+    res
+      .json({message: 'Logged out already'})
+  }
+})
+
 
 server.listen(3300, () => console.log('\nrunning on port 3300\n'));
 
