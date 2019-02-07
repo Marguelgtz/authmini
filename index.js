@@ -113,7 +113,7 @@ const checkRole = (role) => {
 }
 
 // protect this route, only authenticated users should see it
-server.get('/api/users', protected, checkRole('admin'), async (req, res) => {
+server.get('/api/users', protected, async (req, res) => {
   db('users')
     .select('id', 'username')
     .then(users => {
